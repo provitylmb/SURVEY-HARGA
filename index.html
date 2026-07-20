@@ -144,16 +144,26 @@
 
       <div class="card">
         <div class="filter-box">
-          <div>
-            <label>Pilih Departemen Yang Akan Diisi</label>
-            <select id="selectDept" onchange="eksekusiFilterDept()">
-              <option value="ALL">-- TAMPILKAN SEMUA --</option>
-            </select>
+          <div class="grid-2" style="margin-bottom:0;">
+            <div>
+              <label>Pilih Departemen Yang Akan Diisi</label>
+              <select id="selectDept" onchange="terapkanSemuaFilter()">
+                <option value="ALL">-- TAMPILKAN SEMUA --</option>
+              </select>
+            </div>
+            <div>
+              <label>Status Item</label>
+              <select id="selectStatus" onchange="terapkanSemuaFilter()">
+                <option value="ALL">-- SEMUA STATUS --</option>
+                <option value="PARETO">ITEM PARETO</option>
+                <option value="NONPARETO">ITEM NON PARETO</option>
+              </select>
+            </div>
           </div>
           <div>
             <label>Cari Produk Spesifik</label>
             <div style="position:relative;">
-              <input type="text" id="cariInput" oninput="prosesCariSaja()" placeholder="Ketik nama deskripsi produk atau nomor PLU...">
+              <input type="text" id="cariInput" oninput="terapkanSemuaFilter()" placeholder="Ketik nama deskripsi produk atau nomor PLU...">
             </div>
           </div>
         </div>
@@ -288,6 +298,7 @@
               selectDept.appendChild(opt);
             });
 
+            document.getElementById('selectStatus').value = 'ALL';
             document.getElementById('statsBar').style.display = 'flex';
 
             // 2. Ambil histori harga toko ini untuk minggu yang sama
@@ -296,7 +307,7 @@
           })
           .then(historiHarga => {
             inputPrices = historiHarga || {};
-            eksekusiFilterDept();
+            terapkanSemuaFilter();
             alert(`Data ${mingguVal} untuk toko ${kodeVal.toUpperCase()} berhasil dimuat!`);
           })
           .catch(err => {
@@ -330,27 +341,37 @@
       }
     }
 
-    function eksekusiFilterDept() {
+    /**
+     * Menggabungkan 3 filter sekaligus: Departemen, Status (Pareto/Non Pareto), dan Kata Kunci Pencarian.
+     * currentGroupProds = hasil filter Departemen + Status (dipakai juga untuk progress bar "kelompok ini")
+     * filterProds        = currentGroupProds yang disaring lagi oleh kata kunci pencarian (dipakai untuk render list)
+     */
+    function terapkanSemuaFilter() {
       if (!isLocked) { return; }
 
       let targetDept = document.getElementById('selectDept').value;
-      if (targetDept === "ALL") {
-        currentGroupProds = [...allMasterData];
-      } else {
-        currentGroupProds = allMasterData.filter(item => item.dept === targetDept);
-      }
-      
-      document.getElementById('cariInput').value = ''; 
-      prosesCariSaja();
-    }
-
-    function prosesCariSaja() {
+      let targetStatus = document.getElementById('selectStatus').value;
       let key = document.getElementById('cariInput').value.toLowerCase();
+
+      currentGroupProds = allMasterData.filter(item => {
+        if (targetDept !== "ALL" && item.dept !== targetDept) return false;
+
+        if (targetStatus !== "ALL") {
+          let ketUpper = (item.ket || "").toUpperCase();
+          let isPareto = ketUpper.includes('PARETO') && !ketUpper.includes('NON');
+          if (targetStatus === "PARETO" && !isPareto) return false;
+          if (targetStatus === "NONPARETO" && isPareto) return false;
+        }
+
+        return true;
+      });
+
       filterProds = currentGroupProds.filter(item => {
         let descSafe = item.desc ? item.desc.toLowerCase() : '';
         let prdcdSafe = item.prdcd ? item.prdcd.toLowerCase() : '';
         return descSafe.includes(key) || prdcdSafe.includes(key);
       });
+
       curPage = 1;
       updateMetrik();
       renderPage();
@@ -479,7 +500,7 @@
       }
 
       let dataInput = [];
-      currentGroupProds.forEach(item => {
+      allMasterData.forEach(item => {
         if (inputPrices[item.prdcd] && inputPrices[item.prdcd] !== "") {
           dataInput.push({ 
             prdcd: item.prdcd, 
