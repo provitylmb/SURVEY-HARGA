@@ -99,7 +99,7 @@
 
     <div id="loading">
       <div class="spinner"></div>
-      <p style="margin-top:10px;">Menghubungkan ke Server & Mengunduh Data Master...</p>
+      <p style="margin-top:10px;">Menghubungkan ke Server & Mengunduh Daftar Minggu Survey...</p>
     </div>
 
     <div id="contentArea" style="display:none;">
@@ -108,6 +108,14 @@
         <div class="card-title">
           <i class="ti ti-user-check" style="color:var(--color-primary);"></i> Identitas Toko &amp; Surveyor
         </div>
+
+        <div style="margin-bottom:16px;">
+          <label>Pilih Minggu Survey</label>
+          <select id="selectMinggu">
+            <option value="">-- Pilih Minggu --</option>
+          </select>
+        </div>
+
         <div class="grid-2">
           <div>
             <label>Kode Toko</label>
@@ -139,7 +147,7 @@
           <div>
             <label>Pilih Departemen Yang Akan Diisi</label>
             <select id="selectDept" onchange="eksekusiFilterDept()">
-              <option value="ALL">-- TAMPILKAN SEMUA (700+ ITEM) --</option>
+              <option value="ALL">-- TAMPILKAN SEMUA --</option>
             </select>
           </div>
           <div>
@@ -179,9 +187,7 @@
 
   <script>
     /* ============================================================
-       GANTI BARIS DI BAWAH INI dengan URL Web App Apps Script Anda
-       (didapat setelah Deploy > New deployment di Apps Script).
-       Contoh: "https://script.google.com/macros/s/AKfycby.../exec"
+       URL Web App Apps Script Anda.
        ============================================================ */
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyB75I-0582tvGdULAwH_2-HAicBhRkWsiZ_T8jTQ5bISebUOtOFGfLnd9y8QyBDv0WrQ/exec";
 
@@ -190,53 +196,58 @@
     let filterProds = []; 
     let inputPrices = {}; 
     let isLocked = false;
+    let mingguTerpilih = "";
     
     let curPage = 1;
     const sizePerPage = 25; 
 
     window.onload = function() {
-      fetch(APPS_SCRIPT_URL + '?action=getMasterBarang')
+      fetch(APPS_SCRIPT_URL + '?action=getDaftarMinggu')
         .then(res => res.json())
-        .then(initApp)
+        .then(initDaftarMinggu)
         .catch(err => {
           document.getElementById('loading').innerHTML =
             '<p style="color:#dc2626;font-weight:600;">Gagal terhubung ke server. Cek APPS_SCRIPT_URL. (' + err + ')</p>';
         });
     };
 
-    function initApp(res) {
-      if (res.error) { alert(res.error); return; }
-      allMasterData = res.produk || [];
-      
-      let selectEl = document.getElementById('selectDept');
-      if (res.daftarDept) {
-        res.daftarDept.forEach(dp => { 
+    function initDaftarMinggu(daftarMinggu) {
+      let selectEl = document.getElementById('selectMinggu');
+      if (Array.isArray(daftarMinggu) && daftarMinggu.length > 0) {
+        daftarMinggu.forEach(mg => {
           let opt = document.createElement('option');
-          opt.value = dp;
-          opt.innerText = dp;
+          opt.value = mg;
+          opt.innerText = mg;
           selectEl.appendChild(opt);
         });
+      } else {
+        selectEl.innerHTML = '<option value="">-- Belum ada sheet WEEK... --</option>';
       }
-      
+
       document.getElementById('loading').style.display = 'none';
       document.getElementById('contentArea').style.display = 'block';
-      document.getElementById('statsBar').style.display = 'flex';
-      
+
       document.getElementById('listBarang').innerHTML = `
         <div style="text-align:center;padding:2.5rem;color:#1e3a8a;background:#eff6ff;border-radius:12px;border:1px dashed #bfdbfe;font-weight:600;">
-          💡 Silakan lengkapi kolom identitas dan klik tombol "KUNCI KODE TOKO & MUAT HISTORI" di atas untuk memunculkan daftar produk.
+          💡 Silakan pilih Minggu Survey, lengkapi kolom identitas, lalu klik tombol "KUNCI KODE TOKO & MUAT HISTORI" untuk memunculkan daftar produk.
         </div>
       `;
     }
 
     function toggleKunciToko() {
+      let selectMinggu = document.getElementById('selectMinggu');
       let inputKode = document.getElementById('kodeToko');
       let inputNama = document.getElementById('namaToko');
       let inputSurveyor = document.getElementById('namaSurveyor');
       let inputNik = document.getElementById('nik');
       let btn = document.getElementById('btnLockToko');
       let kodeVal = inputKode.value.trim();
+      let mingguVal = selectMinggu.value;
 
+      if (!mingguVal) {
+        alert("⚠️ Silakan pilih Minggu Survey terlebih dahulu!");
+        return;
+      }
       if (!kodeVal) {
         alert("⚠️ Masukkan KODE TOKO terlebih dahulu sebelum mengunci!");
         return;
@@ -244,6 +255,8 @@
 
       if (!isLocked) {
         isLocked = true;
+        mingguTerpilih = mingguVal;
+        selectMinggu.disabled = true;
         inputKode.disabled = true;
         inputNama.disabled = true;
         inputSurveyor.disabled = true;
@@ -255,26 +268,46 @@
         document.getElementById('listBarang').innerHTML = `
           <div style="text-align:center;padding:2rem;color:var(--color-text-sub);">
             <div class="spinner"></div>
-            <p>Sedang memuat histori pengisian lama toko ${kodeVal.toUpperCase()}...</p>
+            <p>Memuat item ${mingguVal} & histori toko ${kodeVal.toUpperCase()}...</p>
           </div>
         `;
 
-        fetch(APPS_SCRIPT_URL + '?action=getHargaLamaToko&kodeToko=' + encodeURIComponent(kodeVal))
+        // 1. Ambil master barang untuk minggu terpilih
+        fetch(APPS_SCRIPT_URL + '?action=getMasterBarang&minggu=' + encodeURIComponent(mingguVal))
           .then(res => res.json())
+          .then(resBarang => {
+            if (resBarang.error) { alert(resBarang.error); return; }
+            allMasterData = resBarang.produk || [];
+
+            let selectDept = document.getElementById('selectDept');
+            selectDept.innerHTML = '<option value="ALL">-- TAMPILKAN SEMUA --</option>';
+            (resBarang.daftarDept || []).forEach(dp => {
+              let opt = document.createElement('option');
+              opt.value = dp;
+              opt.innerText = dp;
+              selectDept.appendChild(opt);
+            });
+
+            document.getElementById('statsBar').style.display = 'flex';
+
+            // 2. Ambil histori harga toko ini untuk minggu yang sama
+            return fetch(APPS_SCRIPT_URL + '?action=getHargaLamaToko&kodeToko=' + encodeURIComponent(kodeVal) + '&minggu=' + encodeURIComponent(mingguVal))
+              .then(res => res.json());
+          })
           .then(historiHarga => {
             inputPrices = historiHarga || {};
             eksekusiFilterDept();
-            alert(`Data histori toko ${kodeVal.toUpperCase()} berhasil disinkronisasi!`);
+            alert(`Data ${mingguVal} untuk toko ${kodeVal.toUpperCase()} berhasil dimuat!`);
           })
           .catch(err => {
-            alert("Gagal memuat histori: " + err);
-            inputPrices = {};
-            eksekusiFilterDept();
+            alert("Gagal memuat data: " + err);
           });
 
       } else {
         if (confirm("Apakah Anda yakin ingin membuka kunci? Input harga sementara toko ini akan di-reset.")) {
           isLocked = false;
+          mingguTerpilih = "";
+          selectMinggu.disabled = false;
           inputKode.disabled = false;
           inputNama.disabled = false;
           inputSurveyor.disabled = false;
@@ -283,10 +316,13 @@
           btn.innerHTML = '<i class="ti ti-lock"></i> KUNCI KODE TOKO &amp; MUAT HISTORI HARGA';
           btn.classList.remove('unlocked');
           inputPrices = {};
+          allMasterData = [];
+          currentGroupProds = [];
+          filterProds = [];
           
           document.getElementById('listBarang').innerHTML = `
             <div style="text-align:center;padding:2.5rem;color:#1e3a8a;background:#eff6ff;border-radius:12px;border:1px dashed #bfdbfe;font-weight:600;">
-              💡 Silakan lengkapi kolom identitas dan klik tombol "KUNCI KODE TOKO & MUAT HISTORI" di atas untuk memunculkan daftar produk.
+              💡 Silakan pilih Minggu Survey, lengkapi kolom identitas, lalu klik tombol "KUNCI KODE TOKO & MUAT HISTORI" untuk memunculkan daftar produk.
             </div>
           `;
           updateMetrik();
@@ -425,7 +461,7 @@
 
     function kirimSurvey() {
       if(!isLocked) {
-        alert("⚠️ Silakan kunci Kode Toko terlebih dahulu sebelum mengirim survey!");
+        alert("⚠️ Silakan pilih Minggu Survey & kunci Kode Toko terlebih dahulu sebelum mengirim survey!");
         return;
       }
 
@@ -468,7 +504,8 @@
         body: JSON.stringify({
           action: 'simpanHasilSurvey',
           identitas: identitas,
-          dataInput: dataInput
+          dataInput: dataInput,
+          minggu: mingguTerpilih
         })
       })
         .then(res => res.json())
@@ -478,6 +515,8 @@
           btn.innerHTML = '<i class="ti ti-send"></i> SIMPAN &amp; KIRIM SURVEY KE PUSAT';
 
           isLocked = false;
+          mingguTerpilih = "";
+          document.getElementById('selectMinggu').disabled = false;
           document.getElementById('kodeToko').disabled = false;
           document.getElementById('namaToko').disabled = false;
           document.getElementById('namaSurveyor').disabled = false;
@@ -488,9 +527,12 @@
           btnLock.classList.remove('unlocked');
 
           inputPrices = {};
+          allMasterData = [];
+          currentGroupProds = [];
+          filterProds = [];
           document.getElementById('listBarang').innerHTML = `
             <div style="text-align:center;padding:2.5rem;color:#1e3a8a;background:#eff6ff;border-radius:12px;border:1px dashed #bfdbfe;font-weight:600;">
-              💡 Silakan lengkapi kolom identitas dan klik tombol "KUNCI KODE TOKO & MUAT HISTORI" di atas untuk memunculkan daftar produk.
+              💡 Silakan pilih Minggu Survey, lengkapi kolom identitas, lalu klik tombol "KUNCI KODE TOKO & MUAT HISTORI" untuk memunculkan daftar produk.
             </div>
           `;
           updateMetrik();
