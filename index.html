@@ -27,6 +27,11 @@
     .brand-header { display: flex; align-items: center; justify-content: space-between; background: white; padding: 15px 24px; border-radius: 12px; margin-bottom: 20px; border: 1px solid var(--color-border); }
     .brand-title { display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--color-primary); font-size: 1.2rem; }
 
+    /* Banner resume sesi */
+    .resume-banner { display:none; align-items:center; gap:10px; background:#ecfdf5; border:1px solid #6ee7b7; color:#065f46; padding:12px 16px; border-radius:10px; margin-bottom:16px; font-size:0.85rem; font-weight:600; }
+    .resume-banner i { font-size:1.2rem; }
+    .resume-banner .btn-clear-session { margin-left:auto; background:transparent; border:1px solid #065f46; color:#065f46; padding:4px 10px; border-radius:6px; font-size:0.75rem; cursor:pointer; text-transform:uppercase; font-weight:700; white-space:nowrap; }
+
     /* Card Identitas */
     .card { background: var(--color-card); padding: 24px; border-radius: 12px; border: 1px solid var(--color-border); margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     .card-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 16px; color: var(--color-text-main); display: flex; align-items: center; gap: 8px; }
@@ -103,6 +108,12 @@
     </div>
 
     <div id="contentArea" style="display:none;">
+
+      <div id="resumeBanner" class="resume-banner">
+        <i class="ti ti-refresh-alert"></i>
+        <span>Sesi terakhir Anda berhasil dipulihkan otomatis, lanjutkan pengisian.</span>
+        <button type="button" class="btn-clear-session" onclick="mulaiSesiBaru()">Mulai Baru</button>
+      </div>
       
       <div class="card">
         <div class="card-title">
@@ -111,7 +122,7 @@
 
         <div style="margin-bottom:16px;">
           <label>Pilih Minggu Survey</label>
-          <select id="selectMinggu">
+          <select id="selectMinggu" onchange="saveSession()">
             <option value="">-- Pilih Minggu --</option>
           </select>
         </div>
@@ -119,21 +130,21 @@
         <div class="grid-2">
           <div>
             <label>Kode Toko</label>
-            <input type="text" id="kodeToko" placeholder="Contoh: TAR9, T001, dll.">
+            <input type="text" id="kodeToko" placeholder="Contoh: TAR9, T001, dll." oninput="saveSession()">
           </div>
           <div>
             <label>Nama Toko</label>
-            <input type="text" id="namaToko" placeholder="Masukkan nama resmi toko">
+            <input type="text" id="namaToko" placeholder="Masukkan nama resmi toko" oninput="saveSession()">
           </div>
         </div>
         <div class="grid-2">
           <div>
             <label>Nama Personil</label>
-            <input type="text" id="namaSurveyor" placeholder="Nama lengkap Anda">
+            <input type="text" id="namaSurveyor" placeholder="Nama lengkap Anda" oninput="saveSession()">
           </div>
           <div>
             <label>NIK Personil</label>
-            <input type="text" id="nik" placeholder="Masukkan NIK pegawai">
+            <input type="text" id="nik" placeholder="Masukkan NIK pegawai" oninput="saveSession()">
           </div>
         </div>
         
@@ -200,6 +211,7 @@
        URL Web App Apps Script Anda.
        ============================================================ */
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyB75I-0582tvGdULAwH_2-HAicBhRkWsiZ_T8jTQ5bISebUOtOFGfLnd9y8QyBDv0WrQ/exec";
+    const SESSION_KEY = "surveyHargaSession_v1";
 
     let allMasterData = []; 
     let currentGroupProds = []; 
@@ -210,6 +222,57 @@
     
     let curPage = 1;
     const sizePerPage = 25; 
+
+    /* ============================================================
+       PENYIMPANAN SESI (anti-reload/anti-hilang saat HP terkunci)
+       Setiap ada perubahan, state disimpan ke localStorage supaya
+       kalau browser reload sendiri (HP terkunci / pindah app),
+       progress bisa dipulihkan otomatis tanpa isi ulang dari nol.
+       ============================================================ */
+    function saveSession() {
+      try {
+        let session = {
+          minggu: document.getElementById('selectMinggu') ? document.getElementById('selectMinggu').value : "",
+          kodeToko: document.getElementById('kodeToko') ? document.getElementById('kodeToko').value : "",
+          namaToko: document.getElementById('namaToko') ? document.getElementById('namaToko').value : "",
+          namaSurveyor: document.getElementById('namaSurveyor') ? document.getElementById('namaSurveyor').value : "",
+          nik: document.getElementById('nik') ? document.getElementById('nik').value : "",
+          isLocked: isLocked,
+          inputPrices: inputPrices,
+          selectDept: document.getElementById('selectDept') ? document.getElementById('selectDept').value : "ALL",
+          selectStatus: document.getElementById('selectStatus') ? document.getElementById('selectStatus').value : "ALL",
+          cariInput: document.getElementById('cariInput') ? document.getElementById('cariInput').value : "",
+          curPage: curPage,
+          savedAt: Date.now()
+        };
+        localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+      } catch (e) { /* localStorage penuh/diblokir - abaikan diam-diam */ }
+    }
+
+    function loadSession() {
+      try {
+        let raw = localStorage.getItem(SESSION_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch (e) { return null; }
+    }
+
+    function clearSession() {
+      try { localStorage.removeItem(SESSION_KEY); } catch (e) {}
+    }
+
+    function mulaiSesiBaru() {
+      if (!confirm("Mulai sesi baru? Semua progress pengisian yang belum dikirim akan dihapus.")) return;
+      clearSession();
+      window.location.reload();
+    }
+
+    // Simpan otomatis tiap kali tab disembunyikan / HP dikunci / app dipindah
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') saveSession();
+    });
+    window.addEventListener('pagehide', saveSession);
+    window.addEventListener('beforeunload', saveSession);
 
     window.onload = function() {
       fetch(APPS_SCRIPT_URL + '?action=getDaftarMinggu')
@@ -242,6 +305,95 @@
           💡 Silakan pilih Minggu Survey, lengkapi kolom identitas, lalu klik tombol "KUNCI KODE TOKO & MUAT HISTORI" untuk memunculkan daftar produk.
         </div>
       `;
+
+      // Cek apakah ada sesi tersimpan sebelumnya (misal karena web sempat reload sendiri)
+      cobaPulihkanSesi();
+    }
+
+    /**
+     * Memulihkan sesi dari localStorage jika ada.
+     * - Kalau sesi belum terkunci: isi ulang field identitas saja (user lanjut isi manual).
+     * - Kalau sesi sudah terkunci: otomatis muat ulang daftar barang minggu tsb,
+     *   pasang kembali semua harga yang sudah diinput, filter, dan halaman terakhir.
+     */
+    function cobaPulihkanSesi() {
+      let session = loadSession();
+      if (!session) return;
+
+      // Isi ulang field identitas & minggu apa pun kondisinya
+      if (session.minggu) document.getElementById('selectMinggu').value = session.minggu;
+      if (session.kodeToko) document.getElementById('kodeToko').value = session.kodeToko;
+      if (session.namaToko) document.getElementById('namaToko').value = session.namaToko;
+      if (session.namaSurveyor) document.getElementById('namaSurveyor').value = session.namaSurveyor;
+      if (session.nik) document.getElementById('nik').value = session.nik;
+
+      if (!session.isLocked) {
+        // Belum sempat dikunci, cukup kembalikan isian form saja
+        return;
+      }
+
+      // Sesi sudah terkunci sebelumnya -> pulihkan penuh otomatis
+      let selectMinggu = document.getElementById('selectMinggu');
+      let inputKode = document.getElementById('kodeToko');
+      let inputNama = document.getElementById('namaToko');
+      let inputSurveyor = document.getElementById('namaSurveyor');
+      let inputNik = document.getElementById('nik');
+      let btn = document.getElementById('btnLockToko');
+
+      isLocked = true;
+      mingguTerpilih = session.minggu;
+      selectMinggu.disabled = true;
+      inputKode.disabled = true;
+      inputNama.disabled = true;
+      inputSurveyor.disabled = true;
+      inputNik.disabled = true;
+      btn.innerHTML = '<i class="ti ti-lock-open"></i> BUKA KUNCI KODE TOKO';
+      btn.classList.add('unlocked');
+
+      document.getElementById('listBarang').innerHTML = `
+        <div style="text-align:center;padding:2rem;color:var(--color-text-sub);">
+          <div class="spinner"></div>
+          <p>Memulihkan sesi ${session.minggu} untuk toko ${(session.kodeToko||'').toUpperCase()}...</p>
+        </div>
+      `;
+
+      fetch(APPS_SCRIPT_URL + '?action=getMasterBarang&minggu=' + encodeURIComponent(session.minggu))
+        .then(res => res.json())
+        .then(resBarang => {
+          if (resBarang.error) { alert(resBarang.error); return; }
+          allMasterData = resBarang.produk || [];
+
+          let selectDept = document.getElementById('selectDept');
+          selectDept.innerHTML = '<option value="ALL">-- TAMPILKAN SEMUA --</option>';
+          (resBarang.daftarDept || []).forEach(dp => {
+            let opt = document.createElement('option');
+            opt.value = dp;
+            opt.innerText = dp;
+            selectDept.appendChild(opt);
+          });
+
+          document.getElementById('statsBar').style.display = 'flex';
+
+          // Pulihkan harga yang sudah pernah diinput di sesi ini (lebih diprioritaskan dari histori server)
+          inputPrices = session.inputPrices || {};
+
+          // Pulihkan filter & halaman terakhir
+          if (session.selectDept) document.getElementById('selectDept').value = session.selectDept;
+          if (session.selectStatus) document.getElementById('selectStatus').value = session.selectStatus;
+          if (session.cariInput) document.getElementById('cariInput').value = session.cariInput;
+
+          terapkanSemuaFilter();
+          if (session.curPage) {
+            let totalPage = Math.ceil(filterProds.length / sizePerPage) || 1;
+            curPage = Math.min(session.curPage, totalPage);
+            renderPage();
+          }
+
+          document.getElementById('resumeBanner').style.display = 'flex';
+        })
+        .catch(err => {
+          alert("Gagal memulihkan sesi otomatis: " + err + ". Silakan kunci ulang toko secara manual.");
+        });
     }
 
     function toggleKunciToko() {
@@ -274,6 +426,7 @@
         
         btn.innerHTML = '<i class="ti ti-lock-open"></i> BUKA KUNCI KODE TOKO';
         btn.classList.add('unlocked');
+        document.getElementById('resumeBanner').style.display = 'none';
         
         document.getElementById('listBarang').innerHTML = `
           <div style="text-align:center;padding:2rem;color:var(--color-text-sub);">
@@ -308,6 +461,7 @@
           .then(historiHarga => {
             inputPrices = historiHarga || {};
             terapkanSemuaFilter();
+            saveSession();
             alert(`Data ${mingguVal} untuk toko ${kodeVal.toUpperCase()} berhasil dimuat!`);
           })
           .catch(err => {
@@ -330,6 +484,8 @@
           allMasterData = [];
           currentGroupProds = [];
           filterProds = [];
+          document.getElementById('resumeBanner').style.display = 'none';
+          clearSession();
           
           document.getElementById('listBarang').innerHTML = `
             <div style="text-align:center;padding:2.5rem;color:#1e3a8a;background:#eff6ff;border-radius:12px;border:1px dashed #bfdbfe;font-weight:600;">
@@ -375,6 +531,7 @@
       curPage = 1;
       updateMetrik();
       renderPage();
+      saveSession();
     }
 
     function renderPage() {
@@ -457,6 +614,7 @@
         if (warningElement) warningElement.innerText = '';
       }
       updateMetrik();
+      saveSession();
     }
 
     function updateMetrik() {
@@ -474,10 +632,10 @@
       document.getElementById('progressBarVisual').style.width = persen + '%';
     }
 
-    function halamanSblm() { if (curPage > 1) { curPage--; renderPage(); window.scrollTo(0,250); } }
+    function halamanSblm() { if (curPage > 1) { curPage--; renderPage(); saveSession(); window.scrollTo(0,250); } }
     function halamanSljt() { 
       let totalPage = Math.ceil(filterProds.length / sizePerPage);
-      if (curPage < totalPage) { curPage++; renderPage(); window.scrollTo(0,250); } 
+      if (curPage < totalPage) { curPage++; renderPage(); saveSession(); window.scrollTo(0,250); } 
     }
 
     function kirimSurvey() {
@@ -551,6 +709,8 @@
           allMasterData = [];
           currentGroupProds = [];
           filterProds = [];
+          document.getElementById('resumeBanner').style.display = 'none';
+          clearSession(); // sesi berhasil terkirim -> hapus, mulai bersih untuk toko berikutnya
           document.getElementById('listBarang').innerHTML = `
             <div style="text-align:center;padding:2.5rem;color:#1e3a8a;background:#eff6ff;border-radius:12px;border:1px dashed #bfdbfe;font-weight:600;">
               💡 Silakan pilih Minggu Survey, lengkapi kolom identitas, lalu klik tombol "KUNCI KODE TOKO & MUAT HISTORI" untuk memunculkan daftar produk.
