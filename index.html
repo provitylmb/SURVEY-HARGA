@@ -267,6 +267,33 @@
       window.location.reload();
     }
 
+    /**
+     * Membatalkan proses kunci karena kode toko yang diketik TIDAK terjadwal
+     * survey pada minggu yang dipilih (dicek dari sheet 'jadwal survey').
+     */
+    function batalKunciKarenaTidakTerjadwal(mingguVal, kodeVal) {
+      isLocked = false;
+      mingguTerpilih = "";
+      document.getElementById('selectMinggu').disabled = false;
+      document.getElementById('kodeToko').disabled = false;
+      document.getElementById('namaToko').disabled = false;
+      document.getElementById('namaSurveyor').disabled = false;
+      document.getElementById('nik').disabled = false;
+
+      let btnLock = document.getElementById('btnLockToko');
+      btnLock.innerHTML = '<i class="ti ti-lock"></i> KUNCI KODE TOKO &amp; MUAT HISTORI HARGA';
+      btnLock.classList.remove('unlocked');
+
+      document.getElementById('listBarang').innerHTML = `
+        <div style="text-align:center;padding:2.5rem;color:#1e3a8a;background:#eff6ff;border-radius:12px;border:1px dashed #bfdbfe;font-weight:600;">
+          💡 Silakan pilih Minggu Survey, lengkapi kolom identitas, lalu klik tombol "KUNCI KODE TOKO & MUAT HISTORI" untuk memunculkan daftar produk.
+        </div>
+      `;
+
+      alert("❌ Kode toko " + kodeVal.toUpperCase() + " TIDAK terjadwal untuk survey pada " + mingguVal +
+        ".\n\nSilakan cek kembali kode toko Anda, atau hubungi admin bila merasa ini keliru.");
+    }
+
     // Simpan otomatis tiap kali tab disembunyikan / HP dikunci / app dipindah
     document.addEventListener('visibilitychange', function () {
       if (document.visibilityState === 'hidden') saveSession();
@@ -431,16 +458,44 @@
         document.getElementById('listBarang').innerHTML = `
           <div style="text-align:center;padding:2rem;color:var(--color-text-sub);">
             <div class="spinner"></div>
-            <p>Memuat item ${mingguVal} & histori toko ${kodeVal.toUpperCase()}...</p>
+            <p>Memvalidasi jadwal toko ${kodeVal.toUpperCase()} untuk ${mingguVal}...</p>
           </div>
         `;
 
-        // 1. Ambil master barang untuk minggu terpilih
-        fetch(APPS_SCRIPT_URL + '?action=getMasterBarang&minggu=' + encodeURIComponent(mingguVal))
+        // 0. Validasi dulu: apakah kode toko ini terjadwal survey pada minggu terpilih?
+        fetch(APPS_SCRIPT_URL + '?action=getJadwalToko&minggu=' + encodeURIComponent(mingguVal))
           .then(res => res.json())
+          .then(daftarJadwal => {
+            let peta = {};
+            (Array.isArray(daftarJadwal) ? daftarJadwal : []).forEach(j => {
+              peta[(j.kdtk || '').toUpperCase()] = j;
+            });
+            let cocok = peta[kodeVal.toUpperCase()];
+
+            if (!cocok) {
+              batalKunciKarenaTidakTerjadwal(mingguVal, kodeVal);
+              let err = new Error('__STOP__');
+              throw err;
+            }
+
+            // Auto-isi nama toko sesuai data resmi di jadwal (cegah salah ketik manual)
+            if (cocok.toko) inputNama.value = cocok.toko;
+
+            document.getElementById('listBarang').innerHTML = `
+              <div style="text-align:center;padding:2rem;color:var(--color-text-sub);">
+                <div class="spinner"></div>
+                <p>Memuat item ${mingguVal} & histori toko ${kodeVal.toUpperCase()}...</p>
+              </div>
+            `;
+
+            // 1. Ambil master barang untuk minggu terpilih
+            return fetch(APPS_SCRIPT_URL + '?action=getMasterBarang&minggu=' + encodeURIComponent(mingguVal))
+              .then(res => res.json());
+          })
           .then(resBarang => {
             if (resBarang.error) { alert(resBarang.error); return; }
             allMasterData = resBarang.produk || [];
+            window.__peringatanDeptTerakhir = resBarang.peringatan || null;
 
             let selectDept = document.getElementById('selectDept');
             selectDept.innerHTML = '<option value="ALL">-- TAMPILKAN SEMUA --</option>';
@@ -462,9 +517,14 @@
             inputPrices = historiHarga || {};
             terapkanSemuaFilter();
             saveSession();
+            if (window.__peringatanDeptTerakhir) {
+              alert("⚠️ " + window.__peringatanDeptTerakhir);
+              window.__peringatanDeptTerakhir = null;
+            }
             alert(`Data ${mingguVal} untuk toko ${kodeVal.toUpperCase()} berhasil dimuat!`);
           })
           .catch(err => {
+            if (err && err.message === '__STOP__') return; // sudah ditangani di batalKunciKarenaTidakTerjadwal
             alert("Gagal memuat data: " + err);
           });
 
