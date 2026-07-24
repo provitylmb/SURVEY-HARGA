@@ -171,10 +171,20 @@
               </select>
             </div>
           </div>
-          <div>
-            <label>Cari Produk Spesifik</label>
-            <div style="position:relative;">
-              <input type="text" id="cariInput" oninput="terapkanSemuaFilter()" placeholder="Ketik nama deskripsi produk atau nomor PLU...">
+          <div class="grid-2" style="margin-bottom:0;">
+            <div>
+              <label>Status Pengisian</label>
+              <select id="selectPengisian" onchange="terapkanSemuaFilter()">
+                <option value="ALL">-- SEMUA ITEM --</option>
+                <option value="BELUM">BELUM DIISI</option>
+                <option value="SUDAH">SUDAH DIISI</option>
+              </select>
+            </div>
+            <div>
+              <label>Cari Produk Spesifik</label>
+              <div style="position:relative;">
+                <input type="text" id="cariInput" oninput="terapkanSemuaFilter()" placeholder="Ketik nama deskripsi produk atau nomor PLU...">
+              </div>
             </div>
           </div>
         </div>
@@ -241,6 +251,7 @@
           inputPrices: inputPrices,
           selectDept: document.getElementById('selectDept') ? document.getElementById('selectDept').value : "ALL",
           selectStatus: document.getElementById('selectStatus') ? document.getElementById('selectStatus').value : "ALL",
+          selectPengisian: document.getElementById('selectPengisian') ? document.getElementById('selectPengisian').value : "ALL",
           cariInput: document.getElementById('cariInput') ? document.getElementById('cariInput').value : "",
           curPage: curPage,
           savedAt: Date.now()
@@ -407,6 +418,7 @@
           // Pulihkan filter & halaman terakhir
           if (session.selectDept) document.getElementById('selectDept').value = session.selectDept;
           if (session.selectStatus) document.getElementById('selectStatus').value = session.selectStatus;
+          if (session.selectPengisian) document.getElementById('selectPengisian').value = session.selectPengisian;
           if (session.cariInput) document.getElementById('cariInput').value = session.cariInput;
 
           terapkanSemuaFilter();
@@ -507,6 +519,7 @@
             });
 
             document.getElementById('selectStatus').value = 'ALL';
+            document.getElementById('selectPengisian').value = 'ALL';
             document.getElementById('statsBar').style.display = 'flex';
 
             // 2. Ambil histori harga toko ini untuk minggu yang sama
@@ -558,15 +571,17 @@
     }
 
     /**
-     * Menggabungkan 3 filter sekaligus: Departemen, Status (Pareto/Non Pareto), dan Kata Kunci Pencarian.
-     * currentGroupProds = hasil filter Departemen + Status (dipakai juga untuk progress bar "kelompok ini")
-     * filterProds        = currentGroupProds yang disaring lagi oleh kata kunci pencarian (dipakai untuk render list)
+     * Menggabungkan 4 filter sekaligus: Departemen, Status (Pareto/Non Pareto),
+     * Status Pengisian (Belum/Sudah Diisi), dan Kata Kunci Pencarian.
+     * currentGroupProds = hasil filter Departemen + Status Pareto (dipakai juga untuk progress bar "kelompok ini")
+     * filterProds        = currentGroupProds yang disaring lagi oleh Status Pengisian + kata kunci pencarian (dipakai untuk render list)
      */
     function terapkanSemuaFilter() {
       if (!isLocked) { return; }
 
       let targetDept = document.getElementById('selectDept').value;
       let targetStatus = document.getElementById('selectStatus').value;
+      let targetPengisian = document.getElementById('selectPengisian').value;
       let key = document.getElementById('cariInput').value.toLowerCase();
 
       currentGroupProds = allMasterData.filter(item => {
@@ -585,7 +600,16 @@
       filterProds = currentGroupProds.filter(item => {
         let descSafe = item.desc ? item.desc.toLowerCase() : '';
         let prdcdSafe = item.prdcd ? item.prdcd.toLowerCase() : '';
-        return descSafe.includes(key) || prdcdSafe.includes(key);
+        let cocokKata = descSafe.includes(key) || prdcdSafe.includes(key);
+        if (!cocokKata) return false;
+
+        if (targetPengisian !== "ALL") {
+          let sudahDiisi = !!(inputPrices[item.prdcd] && inputPrices[item.prdcd] !== "");
+          if (targetPengisian === "BELUM" && sudahDiisi) return false;
+          if (targetPengisian === "SUDAH" && !sudahDiisi) return false;
+        }
+
+        return true;
       });
 
       curPage = 1;
@@ -675,6 +699,16 @@
       }
       updateMetrik();
       saveSession();
+
+      // Kalau sedang memfilter "BELUM DIISI", item yang baru diisi harus otomatis
+      // hilang dari daftar tanpa perlu render ulang seluruh halaman (biar tidak
+      // mengganggu fokus mengetik user berikutnya).
+      let targetPengisian = document.getElementById('selectPengisian').value;
+      if (targetPengisian === "BELUM" && val !== "") {
+        terapkanSemuaFilter();
+      } else if (targetPengisian === "SUDAH" && val === "") {
+        terapkanSemuaFilter();
+      }
     }
 
     function updateMetrik() {
