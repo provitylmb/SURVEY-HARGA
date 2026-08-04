@@ -77,6 +77,7 @@
     
     .input-container { position: relative; width: 50%; max-width: 240px; }
     .input-container input { background: white !important; font-weight: 700; border-color: #cbd5e1; padding-right: 12px; text-align: right; font-size: 1.05rem; color: #1e3a8a; }
+    .input-container input.input-invalid { border-color: #dc2626 !important; box-shadow: 0 0 0 3px rgba(220,38,38,0.12); }
     .warning-text { display: block; color: #ea580c; font-size: 0.7rem; font-weight: bold; margin-top: 4px; text-align: right; }
 
     /* Pagination */
@@ -223,6 +224,10 @@
     const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyB75I-0582tvGdULAwH_2-HAicBhRkWsiZ_T8jTQ5bISebUOtOFGfLnd9y8QyBDv0WrQ/exec";
     const SESSION_KEY = "surveyHargaSession_v1";
 
+    /* Batas selisih harga (Rp) antara input Alfamart dengan Harga Indomaret.
+       Dipakai untuk warning DAN untuk menolak input yang selisihnya kelewat jauh. */
+    const BATAS_SELISIH_WAJAR = 20000;
+
     let allMasterData = []; 
     let currentGroupProds = []; 
     let filterProds = []; 
@@ -232,6 +237,24 @@
     
     let curPage = 1;
     const sizePerPage = 25; 
+
+    /* ============================================================
+       FORMAT ANGKA RIBUAN (agar surveyor tidak salah input,
+       misal 10 ribu tampil "10,000" bukan "10000")
+       ============================================================ */
+    function formatRibuan(angka) {
+      let hanyaAngka = (angka === null || angka === undefined) ? '' : angka.toString().replace(/[^0-9]/g, '');
+      if (hanyaAngka === '') return '';
+      // Buang nol di depan supaya tidak muncul "010,000"
+      hanyaAngka = hanyaAngka.replace(/^0+(?=\d)/, '');
+      return parseInt(hanyaAngka, 10).toLocaleString('en-US');
+    }
+
+    function angkaMentah(strDenganKoma) {
+      if (!strDenganKoma) return '';
+      let bersih = strDenganKoma.toString().replace(/[^0-9]/g, '');
+      return bersih;
+    }
 
     /* ============================================================
        PENYIMPANAN SESI (anti-reload/anti-hilang saat HP terkunci)
@@ -628,19 +651,20 @@
         html = '<div style="text-align:center;padding:3rem;color:var(--color-text-sub);background:white;border-radius:12px;border:1px dashed var(--color-border);">Tidak ada item produk dalam kelompok filter ini.</div>';
       } else {
         pageItems.forEach(item => {
-          let valLama = inputPrices[item.prdcd] || '';
+          let valLamaMentah = angkaMentah(inputPrices[item.prdcd] || '');
+          let valLamaTampil = formatRibuan(valLamaMentah);
           let badgeKet = item.ket ? `<span class="badge ${item.ket.toUpperCase().includes('PARETO') && !item.ket.toUpperCase().includes('NON') ? 'badge-pareto':'' }">${item.ket}</span>` : '';
           
           let hargaIdmTxt = item.hargaIdm ? item.hargaIdm.toString() : "0";
           let numIdm = parseInt(hargaIdmTxt.replace(/[^0-9]/g, '')) || 0;
 
           let warningHtml = '';
-          if (valLama !== "") {
-            let selisih = Math.abs((parseFloat(valLama) || 0) - numIdm);
-            if (selisih > 50000) warningHtml = '⚠️ Harga Tidak Wajar';
+          if (valLamaMentah !== "") {
+            let selisih = Math.abs((parseInt(valLamaMentah, 10) || 0) - numIdm);
+            if (selisih > BATAS_SELISIH_WAJAR) warningHtml = '⚠️ Harga Tidak Wajar';
           }
           
-          let formatIdm = hargaIdmTxt.toLowerCase().includes('rp') ? hargaIdmTxt : 'Rp ' + hargaIdmTxt;
+          let formatIdm = 'Rp ' + formatRibuan(numIdm);
 
           html += `
             <div class="prod-card">
@@ -658,12 +682,15 @@
                   <div class="price-val-indo">${formatIdm}</div>
                 </div>
                 <div class="input-container">
-                  <input type="number" 
+                  <input type="text"
+                         inputmode="numeric"
+                         autocomplete="off"
                          data-prdcd="${item.prdcd || ''}" 
                          data-idmnum="${numIdm}"
-                         value="${valLama}" 
+                         value="${valLamaTampil}" 
                          placeholder="Input Rp Alfa..." 
-                         oninput="rekamHarga(this)">
+                         oninput="rekamHarga(this)"
+                         onblur="validasiBatasHarga(this)">
                   <span class="warning-text" id="warn-${item.prdcd || ''}">${warningHtml}</span>
                 </div>
               </div>
@@ -680,22 +707,41 @@
       document.getElementById('btnNext').disabled = (curPage === totalPage);
     }
 
+    /* Dipanggil setiap kali surveyor mengetik di kolom harga.
+       - Menyisipkan pemisah ribuan ("," ) secara live sambil tetap
+         menjaga posisi kursor tetap wajar di ujung angka.
+       - Menyimpan nilai MENTAH (tanpa koma) ke inputPrices supaya
+         data yang dikirim ke server tetap angka murni. */
     function rekamHarga(el) {
       let prdcd = el.getAttribute('data-prdcd');
-      let hargaIndoNum = parseFloat(el.getAttribute('data-idmnum')) || 0;
-      let val = el.value;
-      inputPrices[prdcd] = val;
-      
+      let hargaIndoNum = parseInt(el.getAttribute('data-idmnum'), 10) || 0;
+
+      let mentah = angkaMentah(el.value);
+      let terformat = formatRibuan(mentah);
+
+      // Jaga posisi kursor: hitung selisih panjang teks sebelum & sesudah format,
+      // lalu geser posisi kursor lama dengan selisih tersebut.
+      let posisiLama = el.selectionStart;
+      let panjangSebelum = el.value.length;
+      el.value = terformat;
+      let panjangSesudah = terformat.length;
+      let posisiBaru = Math.max(0, posisiLama + (panjangSesudah - panjangSebelum));
+      el.setSelectionRange(posisiBaru, posisiBaru);
+
+      inputPrices[prdcd] = mentah;
+
       let warningElement = document.getElementById('warn-' + prdcd);
-      if (val !== "") {
-        let selisihAbsolut = Math.abs((parseFloat(val) || 0) - hargaIndoNum);
-        if (selisihAbsolut > 50000) {
-          if (warningElement) warningElement.innerText = '⚠️ Harga Tidak Wajar';
+      if (mentah !== "") {
+        let selisihAbsolut = Math.abs((parseInt(mentah, 10) || 0) - hargaIndoNum);
+        if (selisihAbsolut > BATAS_SELISIH_WAJAR) {
+          if (warningElement) warningElement.innerText = '⚠️ Harga Tidak Wajar (selisih lebih dari Rp ' + formatRibuan(BATAS_SELISIH_WAJAR) + ')';
         } else {
           if (warningElement) warningElement.innerText = '';
+          el.classList.remove('input-invalid');
         }
       } else {
         if (warningElement) warningElement.innerText = '';
+        el.classList.remove('input-invalid');
       }
       updateMetrik();
       saveSession();
@@ -704,10 +750,40 @@
       // hilang dari daftar tanpa perlu render ulang seluruh halaman (biar tidak
       // mengganggu fokus mengetik user berikutnya).
       let targetPengisian = document.getElementById('selectPengisian').value;
-      if (targetPengisian === "BELUM" && val !== "") {
+      if (targetPengisian === "BELUM" && mentah !== "") {
         terapkanSemuaFilter();
-      } else if (targetPengisian === "SUDAH" && val === "") {
+      } else if (targetPengisian === "SUDAH" && mentah === "") {
         terapkanSemuaFilter();
+      }
+    }
+
+    /* Dipanggil saat surveyor selesai mengetik (kolom kehilangan fokus).
+       Kalau selisih terhadap Harga Indomaret melebihi batas wajar,
+       input DITOLAK (dikosongkan lagi) sampai surveyor mengecek ulang. */
+    function validasiBatasHarga(el) {
+      let prdcd = el.getAttribute('data-prdcd');
+      let hargaIndoNum = parseInt(el.getAttribute('data-idmnum'), 10) || 0;
+      let mentah = angkaMentah(el.value);
+
+      if (mentah === "") return;
+
+      let selisihAbsolut = Math.abs((parseInt(mentah, 10) || 0) - hargaIndoNum);
+      if (selisihAbsolut > BATAS_SELISIH_WAJAR) {
+        el.classList.add('input-invalid');
+        alert(
+          "❌ Harga Rp " + formatRibuan(mentah) + " ditolak.\n\n" +
+          "Selisihnya dengan Harga Indomaret (Rp " + formatRibuan(hargaIndoNum) + ") lebih dari Rp " +
+          formatRibuan(BATAS_SELISIH_WAJAR) + ".\n\n" +
+          "Mohon periksa kembali dan input ulang harga yang benar."
+        );
+        el.value = '';
+        inputPrices[prdcd] = '';
+        let warningElement = document.getElementById('warn-' + prdcd);
+        if (warningElement) warningElement.innerText = '';
+        el.classList.remove('input-invalid');
+        el.focus();
+        updateMetrik();
+        saveSession();
       }
     }
 
@@ -756,7 +832,7 @@
         if (inputPrices[item.prdcd] && inputPrices[item.prdcd] !== "") {
           dataInput.push({ 
             prdcd: item.prdcd, 
-            hargaAlfamart: inputPrices[item.prdcd].toString(),
+            hargaAlfamart: angkaMentah(inputPrices[item.prdcd]).toString(),
             dept: item.dept || "LAIN-LAIN"
           });
         }
